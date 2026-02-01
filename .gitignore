@@ -1,0 +1,133 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.pnpm-store/
+vendor/
+
+# Lock files (generated)
+pnpm-lock.yaml
+bun.lock
+bun.lockb
+
+# Build output
+dist/
+bin/
+coverage/
+*.tsbuildinfo
+
+# Bun build artifacts
+*.bun-build
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+docker-compose.extra.yml
+
+# OS files
+.DS_Store
+**/.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Git worktrees
+.worktrees/
+
+# macOS/iOS app builds
+apps/macos/.build/
+apps/macos/.build-local/
+apps/macos/.swiftpm/
+apps/shared/MoltbotKit/.build/
+apps/shared/MoltbotKit/.swiftpm/
+apps/ios/*.xcodeproj/
+apps/ios/*.xcworkspace/
+apps/ios/.swiftpm/
+apps/ios/Clawdbot.xcodeproj/
+apps/ios/*.xcfilelist
+**/ModuleCache/
+Core/
+
+# fastlane (iOS)
+apps/ios/fastlane/README.md
+apps/ios/fastlane/report.xml
+apps/ios/fastlane/Preview.html
+apps/ios/fastlane/screenshots/
+apps/ios/fastlane/test_output/
+apps/ios/fastlane/logs/
+apps/ios/fastlane/.env
+apps/ios/*.ipa
+apps/ios/*.dSYM.zip
+apps/ios/*.mobileprovision
+
+# Android build
+apps/android/.gradle/
+apps/android/build/
+apps/android/app/build/
+apps/android/local.properties
+*.apk
+*.aab
+
+# Vendor build artifacts
+vendor/a2ui/renderers/lit/dist/
+src/canvas-host/a2ui/*.bundle.js
+src/canvas-host/a2ui/*.map
+.bundle.hash
+
+# UI test artifacts
+ui/src/ui/__screenshots__/
+ui/playwright-report/
+ui/test-results/
+
+# Vitest
+.vitest/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Temp files
+*.tmp
+*.temp
+*.bak
+
+# Python (for OmniParser etc.)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+ENV/
+.pytest_cache/
+
+# Build artifacts / binaries
+Release/
+
+# OmniParser model weights (download separately, ~2GB)
+OmniParser/weights/icon_detect/model.pt
+OmniParser/weights/icon_caption*/
+OmniParser/weights/.cache/
+
+# Swabble (if not needed)
+# Swabble/
+
+# Local untracked files
+.local/
+IDENTITY.md
+USER.md
+*.tgz
+
+# Local tooling
+.serena/

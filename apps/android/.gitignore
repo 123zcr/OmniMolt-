@@ -1,0 +1,54 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Local configuration
+local.properties
+*.properties.local
+
+# IDE - Android Studio / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+.navigation/
+captures/
+
+# Keystore (keep secure, don't commit)
+*.jks
+*.keystore
+signing.properties
+
+# Google Services (may contain API keys)
+google-services.json
+
+# Native
+*.so
+obj/
+
+# Proguard
+proguard/
+
+# Log files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# APK/AAB files
+*.apk
+*.aab
+*.ap_
+
+# Lint
+lint/generated/
+lint/outputs/
+lint/tmp/
+
+# Kotlin
+*.kotlin_module
+
+# Android profiler
+*.hprof

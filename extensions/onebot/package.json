@@ -1,0 +1,37 @@
+{
+  "name": "@moltbot/onebot",
+  "version": "2026.1.27-beta.1",
+  "type": "module",
+  "description": "Moltbot OneBot v11 channel plugin for QQ via NapCat/Lagrange",
+  "moltbot": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "onebot",
+      "label": "OneBot (QQ)",
+      "selectionLabel": "OneBot (QQ/NapCat)",
+      "detailLabel": "OneBot QQ",
+      "docsPath": "/channels/onebot",
+      "docsLabel": "onebot",
+      "blurb": "QQ via OneBot v11 protocol (NapCat/Lagrange).",
+      "aliases": [
+        "qq",
+        "napcat"
+      ],
+      "order": 60
+    },
+    "install": {
+      "npmSpec": "@moltbot/onebot",
+      "localPath": "extensions/onebot",
+      "defaultChoice": "local"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "moltbot": "workspace:*"
+  },
+  "peerDependencies": {
+    "moltbot": ">=2026.1.26"
+  }
+}

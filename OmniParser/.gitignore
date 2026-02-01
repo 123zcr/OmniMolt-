@@ -1,0 +1,56 @@
+# Model weights (download separately, ~2GB total)
+# See weights/README.md for download instructions
+weights/icon_caption/
+weights/icon_caption_blip2/
+weights/icon_caption_florence/
+weights/icon_caption_florence_v2/
+weights/icon_detect/
+weights/icon_detect_v1_5/
+weights/icon_detect_v1_5_2/
+weights/.cache/
+
+# Gradio
+.gradio/
+omnitool/gradio/uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+debug.ipynb
+*.ipynb_checkpoints
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temp
+*.log
+wget-log
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+index.html?linkid=*
