@@ -22,8 +22,8 @@
 
 ```bash
 # 克隆项目
-git clone <your-repo-url>
-cd moltbot
+git clone https://github.com/123zcr/OmniMolt-.git
+cd OmniMolt-
 
 # 安装 Node 依赖
 pnpm install
