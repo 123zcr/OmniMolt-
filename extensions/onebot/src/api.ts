@@ -35,6 +35,24 @@ export async function callOneBotApi<T = unknown>(
     body: JSON.stringify(params),
   });
 
+  if (response.status === 503) {
+    throw new Error(
+      "OneBot/NapCat 服务暂时不可用 (503)。请确认 NapCat 已启动且端口正确，或稍后重试。"
+    );
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    let errMsg = `OneBot API ${response.status}`;
+    try {
+      const body = JSON.parse(text) as { msg?: string; wording?: string };
+      if (body.msg ?? body.wording) errMsg += `: ${body.msg ?? body.wording}`;
+      else if (text) errMsg += `: ${text.slice(0, 200)}`;
+    } catch {
+      if (text) errMsg += `: ${text.slice(0, 200)}`;
+    }
+    throw new Error(errMsg);
+  }
+
   return (await response.json()) as OneBotApiResponse<T>;
 }
 

@@ -19,8 +19,7 @@ import {
   parseTextWithEmoji,
   hasEmojiCode,
 } from "./src/api.js";
-import type { OneBotConfig, OneBotMessageEvent, OneBotEvent } from "./src/types.js";
-import { sendImage as sendOneBotImage } from "./src/api.js";
+import type { OneBotConfig, OneBotMessageEvent, OneBotEvent, OneBotMessage } from "./src/types.js";
 
 type OneBotCoreRuntime = PluginRuntime;
 
@@ -574,7 +573,10 @@ async function processOneBotMessage(params: {
 
   // 格式化消息信封
   const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(config);
-  const fromLabel = isGroup ? `群${groupId}:${senderName || userId}` : senderName || `QQ:${userId}`;
+  // 始终包含 QQ 号，方便 agent 识别发送者身份
+  const fromLabel = isGroup 
+    ? `群${groupId}:${userId}${senderName ? `(${senderName})` : ''}` 
+    : `${userId}${senderName ? `(${senderName})` : ''}`;
 
   const formattedBody = core.channel.reply.formatAgentEnvelope({
     channel: "QQ",
@@ -636,12 +638,15 @@ async function processOneBotMessage(params: {
   const targetUserId = isGroup ? undefined : userId;
   const targetGroupId = isGroup ? groupId : undefined;
 
+  // 记录本轮已发送的纯文本，避免 block 流式 + final 同内容导致重复发送
+  let lastDeliveredText = "";
+
   // 分发消息并处理回复
   await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
     cfg: config,
     dispatcherOptions: {
-      deliver: async (payload) => {
+      deliver: async (payload, info) => {
         const text = payload.text?.trim();
         // 提取 mediaUrls（工具输出的图片等）
         const payloadMediaUrls = payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
@@ -649,6 +654,13 @@ async function processOneBotMessage(params: {
         const hasPayloadMedia = payloadMediaUrls.length > 0;
 
         if (!hasText && !hasPayloadMedia) return;
+
+        // 去重：若 final 回复与上一句已发送的文本完全一致，则不再发（避免流式 block + final 重复）
+        const kind = (info as { kind?: string } | undefined)?.kind;
+        if (kind === "final" && hasText && text === lastDeliveredText && !hasPayloadMedia) {
+          log.info(`[onebot] Skipping duplicate final reply (same as last block)`);
+          return;
+        }
 
         // 检测是否为语音回复（audioAsVoice 标志 + 音频媒体）
         const wantsVoice = payload.audioAsVoice === true;
@@ -734,6 +746,7 @@ async function processOneBotMessage(params: {
             }
 
             if (result.status === "ok") {
+              lastDeliveredText = text;
               log.info("[onebot] Reply sent successfully");
             } else {
               log.error(`[onebot] Reply API error: ${result.retcode}`);
@@ -913,7 +926,7 @@ async function executeScreenshotTool(
       // 直接发送图片到 OneBot
       if (lastSenderContext) {
         try {
-          const result = await sendOneBotImage(lastSenderContext.config, {
+          const result = await sendImage(lastSenderContext.config, {
             messageType: lastSenderContext.messageType,
             userId: lastSenderContext.userId,
             groupId: lastSenderContext.groupId,
@@ -988,25 +1001,64 @@ async function executeScreenshotTool(
 // OmniParser API 配置
 const OMNIPARSER_API_URL = "http://127.0.0.1:8765";
 
-// Computer Use 工具 Schema
+/**
+ * 检查 OmniParser 服务是否可用
+ */
+async function checkOmniParserHealth(): Promise<{ ok: boolean; device?: string; error?: string }> {
+  try {
+    const response = await fetch(`${OMNIPARSER_API_URL}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status}` };
+    }
+    const data = await response.json() as { status?: string; device?: string; model_loaded?: boolean };
+    if (data.status === "ok" && data.model_loaded) {
+      return { ok: true, device: data.device };
+    }
+    return { ok: false, error: "Model not loaded" };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// Computer Use 工具 Schema - 完整版，包含所有 OmniTool 支持的动作
 const ComputerToolSchema = Type.Object({
-  action: Type.Unsafe<"screenshot" | "parse" | "click" | "type" | "key" | "scroll">(Type.String({
-    description: "Action: screenshot (capture screen), parse (detect UI elements with OmniParser), click, type, key, scroll",
-    enum: ["screenshot", "parse", "click", "type", "key", "scroll"],
+  action: Type.Unsafe<
+    | "screenshot" | "parse" | "click" | "type" | "key" | "scroll"
+    | "mouse_move" | "drag" | "middle_click" | "cursor_position" | "hover" | "wait" | "health"
+  >(Type.String({
+    description: `Action to perform:
+- screenshot: Capture screen and return as image for AI analysis
+- parse: Use OmniParser to detect UI elements (returns labeled image with element IDs)
+- click: Click at (x, y) coordinates
+- mouse_move: Move mouse to (x, y) without clicking
+- drag: Drag from current position to (x, y)
+- middle_click: Middle mouse button click
+- cursor_position: Get current mouse cursor position
+- type: Type text
+- key: Press key combination (e.g. "ctrl+c", "enter", "win+d")
+- scroll: Scroll up or down
+- hover: Hover at current position (do nothing, for waiting UI to update)
+- wait: Wait for specified milliseconds
+- health: Check if OmniParser service is available`,
+    enum: ["screenshot", "parse", "click", "type", "key", "scroll", "mouse_move", "drag", "middle_click", "cursor_position", "hover", "wait", "health"],
   })),
-  x: Type.Optional(Type.Number({ description: "X coordinate for click action" })),
-  y: Type.Optional(Type.Number({ description: "Y coordinate for click action" })),
+  x: Type.Optional(Type.Number({ description: "X coordinate for click/mouse_move/drag action" })),
+  y: Type.Optional(Type.Number({ description: "Y coordinate for click/mouse_move/drag action" })),
   text: Type.Optional(Type.String({ description: "Text to type" })),
-  key: Type.Optional(Type.String({ description: "Key to press (Enter, Tab, Escape, Backspace, Delete, Up, Down, Left, Right, etc.)" })),
+  key: Type.Optional(Type.String({ description: "Key to press (Enter, Tab, Escape, Backspace, Delete, Up, Down, Left, Right, Win, Ctrl+C, Alt+F4, etc.)" })),
   direction: Type.Optional(Type.Unsafe<"up" | "down">(Type.String({ 
     description: "Scroll direction",
     enum: ["up", "down"],
   }))),
   clicks: Type.Optional(Type.Number({ description: "Number of clicks: 1=single click (for buttons/menus), 2=double click (REQUIRED for launching apps/opening files from desktop or file explorer). Default 1" })),
-  button: Type.Optional(Type.Unsafe<"left" | "right">(Type.String({
-    description: "Mouse button (left or right), default left",
-    enum: ["left", "right"],
+  button: Type.Optional(Type.Unsafe<"left" | "right" | "middle">(Type.String({
+    description: "Mouse button (left, right, or middle), default left",
+    enum: ["left", "right", "middle"],
   }))),
+  duration: Type.Optional(Type.Number({ description: "Duration in milliseconds for wait action or drag duration. Default: 1000 for wait, 500 for drag" })),
 });
 
 async function executeComputerTool(
@@ -1090,6 +1142,7 @@ async function executeComputerTool(
               source: string;
             };
           }>;
+          labeled_image?: string; // OmniParser 返回的带标注图片 (base64)
         };
         
         if (result.error) {
@@ -1108,6 +1161,7 @@ async function executeComputerTool(
           const centerY = Math.round(((y1 + y2) / 2) * screenHeight);
           return {
             id: e.id,
+            type: e.content.type,
             label: e.content.content,
             interactivity: e.content.interactivity,
             center: { x: centerX, y: centerY },
@@ -1120,21 +1174,44 @@ async function executeComputerTool(
           };
         });
         
-        // 格式化元素列表，显示更多调试信息
-        const elementList = parsedElements
-          .map((e) => `[${e.id}] "${e.label}" at (${e.center.x}, ${e.center.y})${e.interactivity ? " [interactive]" : ""}`)
-          .join("\n");
+        // 格式化元素列表，按类型分组显示
+        const interactiveElements = parsedElements.filter((e) => e.interactivity);
+        const textElements = parsedElements.filter((e) => e.type === "text" && !e.interactivity);
+        const iconElements = parsedElements.filter((e) => e.type === "icon" && !e.interactivity);
         
-        // 显示 OmniParser 返回的原始 image_size 用于调试
-        const omniImageSize = result.image_size ? `${result.image_size.width}x${result.image_size.height}` : "unknown";
+        let elementList = "";
+        if (interactiveElements.length > 0) {
+          elementList += "🔘 Interactive Elements:\n";
+          elementList += interactiveElements
+            .map((e) => `  [${e.id}] "${e.label}" → click(${e.center.x}, ${e.center.y})`)
+            .join("\n");
+          elementList += "\n\n";
+        }
+        if (textElements.length > 0) {
+          elementList += "📝 Text Elements:\n";
+          elementList += textElements
+            .map((e) => `  [${e.id}] "${e.label}" at (${e.center.x}, ${e.center.y})`)
+            .join("\n");
+          elementList += "\n\n";
+        }
+        if (iconElements.length > 0) {
+          elementList += "🎨 Icon Elements:\n";
+          elementList += iconElements
+            .map((e) => `  [${e.id}] "${e.label}" at (${e.center.x}, ${e.center.y})`)
+            .join("\n");
+        }
+        
+        // 优先使用 OmniParser 返回的带标注图片，这样用户可以看到元素编号
+        const displayImage = result.labeled_image || base64Data;
+        const hasLabeledImage = Boolean(result.labeled_image);
         
         return {
           content: [
             { 
               type: "text", 
-              text: `OmniParser detected ${result.element_count || 0} UI elements.\nScreen (logical): ${screenWidth}x${screenHeight}, OmniParser image: ${omniImageSize}\n\n${elementList}\n\nTo click an element, use: action="click", x=<center_x>, y=<center_y>` 
+              text: `🔍 OmniParser 检测到 ${result.element_count || 0} 个 UI 元素\n📐 屏幕尺寸: ${screenWidth}x${screenHeight}\n${hasLabeledImage ? "📸 已返回带编号标注的图片\n" : ""}\n${elementList}\n💡 点击元素示例: action="click", x=<center_x>, y=<center_y>` 
             },
-            { type: "image", data: base64Data, mimeType: "image/png" },
+            { type: "image", data: displayImage, mimeType: "image/png" },
           ],
           details: { 
             path: screenshotPath, 
@@ -1142,6 +1219,7 @@ async function executeComputerTool(
             height: screenHeight, 
             elements: parsedElements,
             omniparser: true,
+            hasLabeledImage,
           },
         };
       } catch (err) {
@@ -1150,11 +1228,27 @@ async function executeComputerTool(
           content: [
             { 
               type: "text", 
-              text: `OmniParser not available (${String(err)}). Returning screenshot for manual analysis. Screen size: ${width}x${height}.` 
+              text: `⚠️ OmniParser 不可用 (${String(err)})。\n返回原始截图供手动分析。屏幕尺寸: ${width}x${height}。\n\n💡 提示: 运行 action="health" 检查 OmniParser 服务状态` 
             },
             { type: "image", data: base64Data, mimeType: "image/png" },
           ],
           details: { path: screenshotPath, width, height, omniparser: false },
+        };
+      }
+    }
+
+    if (action === "health") {
+      // 检查 OmniParser 服务健康状态
+      const health = await checkOmniParserHealth();
+      if (health.ok) {
+        return {
+          content: [{ type: "text", text: `✅ OmniParser 服务正常运行\n🖥️ 设备: ${health.device || "unknown"}\n🔗 地址: ${OMNIPARSER_API_URL}` }],
+          details: health,
+        };
+      } else {
+        return {
+          content: [{ type: "text", text: `❌ OmniParser 服务不可用\n错误: ${health.error}\n🔗 地址: ${OMNIPARSER_API_URL}\n\n💡 请确保 OmniParser 服务已启动:\ncd OmniParser && python omniparser_api.py` }],
+          details: health,
         };
       }
     }
@@ -1362,6 +1456,170 @@ ${keyUpCalls}
       };
     }
 
+    if (action === "mouse_move") {
+      // 移动鼠标到指定位置（不点击）
+      const x = args.x as number;
+      const y = args.y as number;
+      
+      if (typeof x !== "number" || typeof y !== "number") {
+        return { content: [{ type: "text", text: "mouse_move requires x and y coordinates" }] };
+      }
+      
+      const moveScript = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class MouseHelper {
+  [DllImport("user32.dll")]
+  public static extern bool SetProcessDPIAware();
+}
+'@
+[MouseHelper]::SetProcessDPIAware() | Out-Null
+[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})
+`;
+      
+      const scriptPath = path.join(os.tmpdir(), `mousemove-${Date.now()}.ps1`);
+      fs.writeFileSync(scriptPath, moveScript, "ascii");
+      
+      try {
+        execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+          encoding: "utf-8",
+          windowsHide: true,
+          timeout: 5000,
+        });
+      } finally {
+        try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
+      }
+      
+      return {
+        content: [{ type: "text", text: `🖱️ Mouse moved to (${x}, ${y})` }],
+        details: { x, y },
+      };
+    }
+
+    if (action === "drag") {
+      // 从当前位置拖拽到目标位置
+      const x = args.x as number;
+      const y = args.y as number;
+      const duration = (args.duration as number) || 500;
+      
+      if (typeof x !== "number" || typeof y !== "number") {
+        return { content: [{ type: "text", text: "drag requires x and y coordinates" }] };
+      }
+      
+      // 使用 mouse_event 实现拖拽：按下 -> 移动 -> 释放
+      const dragScript = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public class DragHelper {
+  [DllImport("user32.dll")]
+  public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll", CharSet = CharSet.Auto, CallingConvention = CallingConvention.StdCall)]
+  public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint cButtons, uint dwExtraInfo);
+  public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+  public const uint MOUSEEVENTF_LEFTUP = 0x04;
+  
+  public static void SmoothDrag(int startX, int startY, int endX, int endY, int durationMs) {
+    SetProcessDPIAware();
+    int steps = Math.Max(10, durationMs / 20);
+    double stepX = (double)(endX - startX) / steps;
+    double stepY = (double)(endY - startY) / steps;
+    int sleepMs = durationMs / steps;
+    
+    // Move to start and press
+    System.Windows.Forms.Cursor.Position = new System.Drawing.Point(startX, startY);
+    Thread.Sleep(50);
+    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+    Thread.Sleep(50);
+    
+    // Smooth move
+    for (int i = 1; i <= steps; i++) {
+      int x = startX + (int)(stepX * i);
+      int y = startY + (int)(stepY * i);
+      System.Windows.Forms.Cursor.Position = new System.Drawing.Point(x, y);
+      Thread.Sleep(sleepMs);
+    }
+    
+    // Release
+    Thread.Sleep(50);
+    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+  }
+}
+'@
+$pos = [System.Windows.Forms.Cursor]::Position
+Write-Output "$($pos.X),$($pos.Y)"
+[DragHelper]::SmoothDrag($pos.X, $pos.Y, ${x}, ${y}, ${duration})
+`;
+      
+      const scriptPath = path.join(os.tmpdir(), `drag-${Date.now()}.ps1`);
+      fs.writeFileSync(scriptPath, dragScript, "ascii");
+      
+      let startPos = "unknown";
+      try {
+        const output = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+          encoding: "utf-8",
+          windowsHide: true,
+          timeout: duration + 5000,
+        });
+        startPos = output.trim().split(/\r?\n/)[0] || "unknown";
+      } finally {
+        try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
+      }
+      
+      return {
+        content: [{ type: "text", text: `🖱️ Dragged from (${startPos}) to (${x}, ${y})` }],
+        details: { startPos, endX: x, endY: y, duration },
+      };
+    }
+
+    if (action === "middle_click") {
+      // 中键点击
+      const middleClickCmd = `powershell -ExecutionPolicy Bypass -Command "$sig='[DllImport(\\\"user32.dll\\\")] public static extern void mouse_event(int flags, int dx, int dy, int data, int info);'; Add-Type -MemberDefinition $sig -Name U -Namespace W; [W.U]::mouse_event(0x20, 0, 0, 0, 0); Start-Sleep -Milliseconds 50; [W.U]::mouse_event(0x40, 0, 0, 0, 0)"`;
+      
+      execSync(middleClickCmd, { encoding: "utf-8", windowsHide: true, timeout: 5000 });
+      
+      return {
+        content: [{ type: "text", text: "🖱️ Middle clicked" }],
+        details: { button: "middle" },
+      };
+    }
+
+    if (action === "cursor_position") {
+      // 获取当前鼠标位置
+      const posCmd = `powershell -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class DPI { [DllImport(\\\"user32.dll\\\")] public static extern bool SetProcessDPIAware(); }'; [DPI]::SetProcessDPIAware() | Out-Null; $p=[System.Windows.Forms.Cursor]::Position; Write-Output \\"$($p.X),$($p.Y)\\""`;
+      
+      const output = execSync(posCmd, { encoding: "utf-8", windowsHide: true, timeout: 5000 });
+      const [curX, curY] = output.trim().split(",").map(Number);
+      
+      return {
+        content: [{ type: "text", text: `🖱️ Current cursor position: (${curX}, ${curY})` }],
+        details: { x: curX, y: curY },
+      };
+    }
+
+    if (action === "hover") {
+      // 悬停（什么都不做，等待 UI 更新）
+      return {
+        content: [{ type: "text", text: "🖱️ Hovering at current position" }],
+        details: { action: "hover" },
+      };
+    }
+
+    if (action === "wait") {
+      // 等待指定时间
+      const duration = (args.duration as number) || 1000;
+      
+      // 使用 Promise 延迟
+      await new Promise((resolve) => setTimeout(resolve, duration));
+      
+      return {
+        content: [{ type: "text", text: `⏱️ Waited ${duration}ms` }],
+        details: { duration },
+      };
+    }
+
     return { content: [{ type: "text", text: `Unknown action: ${action}` }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Computer action failed: ${String(err)}` }] };
@@ -1406,10 +1664,22 @@ const plugin = {
         name: "computer",
         label: "Computer Use (Windows)",
         description:
-          "Control the computer desktop: click, type, press keys, scroll. " +
-          "Use 'screenshot' action first to see the screen, then use coordinates to click. " +
-          "Actions: screenshot (capture screen and return as image), click (x, y), " +
-          "type (text), key (press key like Enter, Tab, Escape), scroll (direction).",
+          "Control the computer desktop with full mouse/keyboard control. " +
+          "WORKFLOW: 1) Use 'parse' to detect UI elements with OmniParser (returns labeled image with IDs), " +
+          "2) Click elements using the coordinates provided. " +
+          "ACTIONS: " +
+          "• parse - OmniParser UI detection (RECOMMENDED: shows labeled image with element IDs) " +
+          "• screenshot - Raw screen capture for manual analysis " +
+          "• click(x,y) - Left/right/double click at coordinates " +
+          "• mouse_move(x,y) - Move cursor without clicking " +
+          "• drag(x,y) - Drag from current position to target " +
+          "• middle_click - Middle mouse button " +
+          "• cursor_position - Get current cursor location " +
+          "• type(text) - Type text " +
+          "• key(combo) - Press keys (e.g. 'enter', 'ctrl+c', 'win+d', 'alt+f4') " +
+          "• scroll(direction) - Scroll up/down " +
+          "• wait(duration) - Wait milliseconds " +
+          "• health - Check OmniParser service status",
         parameters: ComputerToolSchema,
         execute: executeComputerTool,
       });
