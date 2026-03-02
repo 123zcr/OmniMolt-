@@ -161,3 +161,12 @@
 - Publish: `npm publish --access public --otp="<otp>"` (run from the package dir).
 - Verify without local npmrc side effects: `npm view <pkg> version --userconfig "$(mktemp)"`.
 - Kill the tmux session after publish.
+
+## Cursor Cloud specific instructions
+- **Node 22+ and pnpm 10.23** are pre-installed via nvm/corepack.
+- Build requires `CLAWDBOT_A2UI_SKIP_MISSING=1` because the `vendor/a2ui` sources are not in the checkout. Use: `CLAWDBOT_A2UI_SKIP_MISSING=1 pnpm build`.
+- Standard dev commands are documented in `## Build, Test, and Development Commands` above. Key commands: `pnpm install`, `pnpm build` (tsc), `pnpm lint` (oxlint), `pnpm format` (oxfmt), `pnpm test` (vitest).
+- The CLI can be invoked in dev via `pnpm moltbot <subcommand>`. It auto-rebuilds stale `dist/` on invocation.
+- No external services (databases, message brokers) are required for the core build/test/lint cycle. The app uses embedded SQLite.
+- Bun is optional and not installed in the Cloud VM; all dev workflows work via Node + pnpm.
+- `pnpm moltbot doctor` and `pnpm moltbot status --all` are good smoke tests for CLI health.
